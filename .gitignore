@@ -1,0 +1,50 @@
+# Build artifacts
+/artifacts/
+/build/output/
+
+# Temporary build directories
+/tmp/
+*.tmp
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Package cache
+/var/cache/mix/
+
+# Database files
+*.db
+*.db-journal
+
+# ISO and images
+*.iso
+*.img
+*.qcow2
+
+# Kernel build
+linux-*/
+*.tar.xz
+*.tar.gz
+*.tar.bz2
+
+# Test coverage
+coverage.out
+coverage.html

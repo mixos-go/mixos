@@ -1,0 +1,64 @@
+FROM alpine:3.19
+
+LABEL maintainer="MixOS-GO Team"
+LABEL description="MixOS-GO Build Toolchain"
+
+# Install build dependencies
+RUN apk add --no-cache \
+    # Kernel build tools
+    gcc \
+    g++ \
+    make \
+    bc \
+    bison \
+    flex \
+    elfutils-dev \
+    openssl-dev \
+    perl \
+    linux-headers \
+    ncurses-dev \
+    # Go toolchain
+    go \
+    # ISO creation tools
+    grub \
+    grub-bios \
+    xorriso \
+    squashfs-tools \
+    mtools \
+    # General utilities
+    curl \
+    wget \
+    tar \
+    gzip \
+    xz \
+    cpio \
+    git \
+    bash \
+    file \
+    patch \
+    # musl development
+    musl-dev \
+    # SQLite for package manager
+    sqlite-dev \
+    sqlite-static \
+    # Testing tools
+    qemu-system-x86_64 \
+    qemu-img
+
+# Set Go environment
+ENV GOPATH=/go
+ENV PATH=$PATH:/go/bin
+
+# Create working directories
+RUN mkdir -p /build /output /src
+
+WORKDIR /build
+
+# Verify tools are available
+RUN echo "Verifying toolchain..." && \
+    gcc --version && \
+    go version && \
+    grub-mkrescue --version && \
+    mksquashfs -version
+
+CMD ["/bin/bash"]
