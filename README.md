@@ -26,6 +26,18 @@ make rootfs      # Build root filesystem
 make iso         # Build bootable ISO
 ```
 
+### Unattended / Automated ISO
+
+You can build an unattended ISO that embeds a sample installer config (`packaging/install.yaml`) and will run the installer at first boot.
+
+```bash
+# Build an unattended ISO using the repository sample config
+make iso-autoinstall
+
+# Or provide your own config
+INSTALL_CONFIG=/path/to/install.yaml make iso
+```
+
 ### Testing
 
 ```bash

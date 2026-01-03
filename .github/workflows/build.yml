@@ -24,10 +24,21 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Run tests
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ${{ github.workspace }}/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Run vet and tests
         working-directory: src/mix-cli
         run: |
           go mod tidy
+          go vet ./...
           go test -v ./...
 
       - name: Build mix binary
@@ -100,6 +111,16 @@ jobs:
             mtools \
             cpio
 
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ${{ github.workspace }}/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
       - name: Download kernel artifacts
         uses: actions/download-artifact@v4
         with:
@@ -111,6 +132,32 @@ jobs:
         run: |
           go mod tidy
           CGO_ENABLED=1 go build -ldflags="-s -w" -o ../../artifacts/mix .
+
+      - name: Build installer binary
+        working-directory: src/installer
+        run: |
+          mkdir -p ../../artifacts
+          go mod tidy
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o ../../artifacts/mixos-install .
+          ls -lah ../../artifacts || true
+
+      - name: Smoke check installer
+        run: |
+          if [ -f artifacts/mixos-install ]; then
+            chmod +x artifacts/mixos-install
+            artifacts/mixos-install --version || (echo 'installer smoke failed' && exit 1)
+          else
+            echo "Installer binary not found"; exit 1
+          fi
+
+      - name: Autoinstall dry-run
+        run: |
+          if [ -f artifacts/mixos-install ]; then
+            chmod +x artifacts/mixos-install
+            artifacts/mixos-install --config packaging/install.yaml --dry-run || (echo 'installer autoinstall dry-run failed' && exit 1)
+          else
+            echo "Installer binary not found"; exit 1
+          fi
 
       - name: Build packages
         run: |

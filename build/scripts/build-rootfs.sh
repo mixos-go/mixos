@@ -57,17 +57,22 @@ echo "Patch directory: $PATCH_DIR"
 
 cd "$BUSYBOX_SRC"
 
-# Apply patches
+# Apply patches (quiet + check before applying to avoid noisy warnings)
 if [ -d "$PATCH_DIR" ]; then
     for patch in "$PATCH_DIR"/busybox-*.patch; do
-        if [ -f "$patch" ]; then
-            echo "Applying patch: $(basename "$patch")"
-            patch -p1 < "$patch" || echo "Patch may already be applied or failed"
+        [ -f "$patch" ] || continue
+        name="$(basename "$patch")"
+        echo "Applying patch: $name"
+        # prefer git apply --check to detect already-applied patches
+        if git -C "$BUSYBOX_SRC" apply --check "$patch" 2>/dev/null; then
+            # apply patch quietly
+            patch -p1 -s < "$patch" || echo "Failed to apply $name"
+        else
+            echo "Skipping $name (already applied or not applicable)"
         fi
     done
 else
-    echo "Warning: Patch directory not found at $PATCH_DIR"
-    ls -la "$REPO_ROOT/build/" || true
+    echo "No patch directory at $PATCH_DIR, skipping patches"
 fi
 
 # Configure BusyBox for static build
@@ -133,16 +138,11 @@ EOF
 
 # Create /etc/issue
 cat > "$ROOTFS_DIR/etc/issue" << 'EOF'
+MixOS-GO v1.0.0 - Minimal Linux Distribution
 
-  __  __ _       ___  ____        ____  ___  
- |  \/  (_)_  __/ _ \/ ___|      / ___|/ _ \ 
- | |\/| | \ \/ / | | \___ \ ____| |  _| | | |
- | |  | | |>  <| |_| |___) |____| |_| | |_| |
- |_|  |_|_/_/\_\\___/|____/      \____|\___/ 
-                                              
- MixOS-GO v1.0.0 - Minimal Linux Distribution
- 
- Kernel \r on \m (\l)
+Welcome to MixOS-GO!
+
+Kernel \r on \m (\l)
 
 EOF
 
@@ -201,10 +201,13 @@ cat > "$ROOTFS_DIR/etc/inittab" << 'EOF'
 # System initialization
 ::sysinit:/etc/init.d/rcS
 
-# Start getty on console
-::respawn:/sbin/getty -L console 115200 vt100
+# Start getty on serial and consoles
+# Serial (common CI / VM serial device)
+ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100
 tty1::respawn:/sbin/getty 38400 tty1
 tty2::respawn:/sbin/getty 38400 tty2
+# Fallback to /dev/console for environments expecting a "console" device
+::respawn:/sbin/getty -L console 115200 vt100
 
 # Stuff to do before rebooting
 ::shutdown:/etc/init.d/rcK
@@ -375,6 +378,83 @@ if [ -f "$OUTPUT_DIR/mix" ]; then
     echo "Installing mix package manager..."
     cp "$OUTPUT_DIR/mix" "$ROOTFS_DIR/usr/bin/mix"
     chmod +x "$ROOTFS_DIR/usr/bin/mix"
+fi
+
+# Copy installer if available
+if [ -f "$OUTPUT_DIR/mixos-install" ]; then
+    echo "Installing mixos installer..."
+    cp "$OUTPUT_DIR/mixos-install" "$ROOTFS_DIR/usr/bin/mixos-install"
+    chmod +x "$ROOTFS_DIR/usr/bin/mixos-install"
+fi
+
+# Create installer configuration directory and sample config
+mkdir -p "$ROOTFS_DIR/etc/mixos"
+cat > "$ROOTFS_DIR/etc/mixos/install.yaml.sample" << 'EOF'
+# MixOS installer sample configuration (YAML)
+hostname: mixos-host
+# Either provide plaintext passwords (will be hashed by system) or provide a precomputed hash.
+root_password: "changeme"
+#root_password_hash: "$6$..."
+create_user:
+    name: demo
+    password: "demo"
+    sudo: true
+network:
+    mode: dhcp
+    interface: eth0
+packages:
+    - base-files
+    - openssh
+post_install_scripts:
+    - |
+        echo "Post-install script running"
+EOF
+
+# First-boot init script (runs installer on first boot if present)
+cat > "$ROOTFS_DIR/etc/init.d/S10firstboot" << 'EOF'
+#!/bin/sh
+# MixOS firstboot installer hook
+
+MARKER=/var/lib/mixos/firstboot_done
+if [ -f "$MARKER" ]; then
+        exit 0
+fi
+
+if [ -x /usr/bin/mixos-install ]; then
+        if [ -f /etc/mixos/install.yaml ]; then
+                echo "Running unattended installer from /etc/mixos/install.yaml"
+                /usr/bin/mixos-install --config /etc/mixos/install.yaml || true
+        else
+                # Run interactive installer if console available
+                if [ -c /dev/tty1 ] || [ -t 1 ]; then
+                        echo "Starting interactive installer"
+                        /usr/bin/mixos-install || true
+                else
+                        echo "No installer config and no interactive console; skipping installer"
+                fi
+        fi
+fi
+
+mkdir -p /var/lib/mixos
+touch "$MARKER"
+exit 0
+EOF
+chmod +x "$ROOTFS_DIR/etc/init.d/S10firstboot"
+
+# Ensure marker dir exists on image
+mkdir -p "$ROOTFS_DIR/var/lib/mixos"
+
+# Optionally copy a provided install.yaml into the image for unattended ISOs.
+# Set INSTALL_CONFIG to an absolute path to a YAML file, or place a
+# packaging/install.yaml file in the repository.
+if [ -n "$INSTALL_CONFIG" ] && [ -f "$INSTALL_CONFIG" ]; then
+    echo "Copying provided installer config: $INSTALL_CONFIG -> /etc/mixos/install.yaml"
+    cp "$INSTALL_CONFIG" "$ROOTFS_DIR/etc/mixos/install.yaml"
+    chmod 0644 "$ROOTFS_DIR/etc/mixos/install.yaml"
+elif [ -f "$(pwd)/packaging/install.yaml" ]; then
+    echo "Copying packaging/install.yaml -> /etc/mixos/install.yaml"
+    cp "$(pwd)/packaging/install.yaml" "$ROOTFS_DIR/etc/mixos/install.yaml"
+    chmod 0644 "$ROOTFS_DIR/etc/mixos/install.yaml"
 fi
 
 # Create package database directory

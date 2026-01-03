@@ -280,8 +280,10 @@ chmod 644 "$ROOTFS/etc/ssh/banner"
 cat > "$ROOTFS/etc/securetty" << 'EOF'
 console
 tty1
+ttyS0
 EOF
 chmod 600 "$ROOTFS/etc/securetty"
+
 
 # Create /etc/hosts.deny and /etc/hosts.allow
 cat > "$ROOTFS/etc/hosts.deny" << 'EOF'

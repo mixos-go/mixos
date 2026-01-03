@@ -2,7 +2,7 @@
 # Version 1.0.0
 
 SHELL := /bin/bash
-.PHONY: all clean toolchain kernel mix-cli packages rootfs iso test help
+.PHONY: all clean toolchain kernel mix-cli installer packages rootfs iso test help
 
 # Configuration
 VERSION := 1.0.0
@@ -24,7 +24,7 @@ NC := \033[0m
 # Main targets
 #=============================================================================
 
-all: toolchain-check kernel mix-cli packages rootfs iso
+all: toolchain-check kernel mix-cli installer packages rootfs iso
 	@echo -e "$(GREEN)✓ MixOS-GO v$(VERSION) build complete!$(NC)"
 	@echo ""
 	@echo "Build artifacts:"
@@ -119,6 +119,15 @@ packages: mix-cli
 	@echo -e "$(GREEN)✓ Packages built$(NC)"
 	@ls -la $(OUTPUT_DIR)/packages/ 2>/dev/null || true
 
+# Installer binary build (so build-rootfs.sh can copy it into rootfs)
+installer: toolchain-check
+	@echo -e "$(YELLOW)Building mixos installer binary...$(NC)"
+	@mkdir -p $(OUTPUT_DIR)
+	cd src/installer && \
+		go mod tidy && \
+		GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o $(OUTPUT_DIR)/mixos-install .
+	@echo -e "$(GREEN)✓ Installer built ($(shell du -h $(OUTPUT_DIR)/mixos-install | cut -f1 2>/dev/null || echo '0'))$(NC)"
+
 #=============================================================================
 # Root Filesystem
 #=============================================================================
@@ -136,6 +145,17 @@ iso: rootfs
 	@echo -e "$(YELLOW)Building ISO image...$(NC)"
 	@bash build/scripts/build-iso.sh
 	@echo -e "$(GREEN)✓ ISO generated$(NC)"
+
+# Build an unattended ISO embedding packaging/install.yaml
+iso-autoinstall: toolchain-check
+	@echo -e "$(YELLOW)Building unattended ISO (packaging/install.yaml)...$(NC)"
+	@mkdir -p $(OUTPUT_DIR)
+	@export INSTALL_CONFIG=$(CURDIR)/packaging/install.yaml; \
+		echo "Using INSTALL_CONFIG=$$INSTALL_CONFIG"; \
+		bash build/scripts/build-kernel.sh; \
+		bash build/scripts/build-rootfs.sh; \
+		bash build/scripts/build-iso.sh; \
+		echo -e "$(GREEN)✓ Unattended ISO generated$(NC)"
 
 #=============================================================================
 # Testing

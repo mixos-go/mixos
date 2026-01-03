@@ -139,17 +139,23 @@ set menu_color_normal=white/black
 set menu_color_highlight=black/light-gray
 
 menuentry "MixOS-GO v1.0.0" {
-    linux /boot/vmlinuz quiet
+    linux /boot/vmlinuz quiet console=tty0 console=ttyS0,115200
     initrd /boot/initramfs.img
 }
 
 menuentry "MixOS-GO v1.0.0 (verbose)" {
-    linux /boot/vmlinuz
+    linux /boot/vmlinuz console=tty0 console=ttyS0,115200
     initrd /boot/initramfs.img
 }
 
 menuentry "MixOS-GO v1.0.0 (recovery)" {
-    linux /boot/vmlinuz single init=/bin/sh
+    linux /boot/vmlinuz single init=/bin/sh console=tty0 console=ttyS0,115200
+    initrd /boot/initramfs.img
+}
+
+# Automatic installer entry (uses /etc/mixos/install.yaml on the live image)
+menuentry "MixOS-GO Automatic Install" {
+    linux /boot/vmlinuz console=tty0 console=ttyS0,115200 mixos.autoinstall=1 mixos.config=/etc/mixos/install.yaml
     initrd /boot/initramfs.img
 }
 EOF

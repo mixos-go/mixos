@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mixos-go/mix-cli/pkg/manager"
+	"github.com/mixos-go/src/mix-cli/pkg/manager"
 	"github.com/spf13/cobra"
 )
 

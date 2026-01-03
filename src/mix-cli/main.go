@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/mixos-go/mix-cli/cmd"
+	"github.com/mixos-go/src/mix-cli/cmd"
 )
 
 func main() {

@@ -2,9 +2,16 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
-	"github.com/mixos-go/mix-cli/pkg/manager"
+	"github.com/mixos-go/src/mix-cli/pkg/manager"
 	"github.com/spf13/cobra"
+
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/term"
 )
 
 var installCmd = &cobra.Command{
@@ -13,6 +20,62 @@ var installCmd = &cobra.Command{
 	Long:  `Install one or more packages with automatic dependency resolution.`,
 	Args:  cobra.MinimumNArgs(1),
 	RunE:  runInstall,
+}
+
+// tuiModel is a Bubble Tea model used to render install progress.
+type tuiModel struct {
+	sp   spinner.Model
+	prog progress.Model
+	msg  string
+	ch   <-chan manager.ProgressUpdate
+}
+
+func (m tuiModel) Init() tea.Cmd {
+	return tea.Batch(m.sp.Tick, func() tea.Msg {
+		for u := range m.ch {
+			return u
+		}
+		return nil
+	})
+}
+
+func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		var c tea.Cmd
+		m.sp, c = m.sp.Update(msg)
+		cmd = c
+	case progress.FrameMsg:
+		var c tea.Cmd
+		pm, c := m.prog.Update(msg)
+		if newProg, ok := pm.(progress.Model); ok {
+			m.prog = newProg
+		}
+		cmd = c
+	case manager.ProgressUpdate:
+		m.msg = msg.Message
+		if setter, ok := interface{}(&m.prog).(interface{ SetPercent(float64) }); ok {
+			setter.SetPercent(msg.Percent)
+		}
+		// schedule listening for next update
+		return m, func() tea.Msg {
+			for u := range m.ch {
+				return u
+			}
+			return nil
+		}
+	case nil:
+		// channel closed
+		return m, tea.Quit
+	}
+	return m, cmd
+}
+
+func (m tuiModel) View() string {
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12")).Render("Mix Installer")
+	body := lipgloss.NewStyle().Align(lipgloss.Center).Render(m.msg)
+	return title + "\n\n" + m.sp.View() + " " + m.prog.View() + "\n\n" + body
 }
 
 func init() {
@@ -66,7 +129,55 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Install packages
+	// If stdout is a terminal, run a TUI installer; otherwise run headless
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		// create progress channel
+		ch := make(chan manager.ProgressUpdate)
+		errCh := make(chan error, 1)
+		mgr.SetProgressChan(ch)
+
+		// start installation in goroutine
+		go func() {
+			for _, pkg := range toInstall {
+				if err := mgr.Install(pkg); err != nil {
+					errCh <- fmt.Errorf("failed to install %s: %w", pkg, err)
+					close(ch)
+					return
+				}
+			}
+			close(ch)
+			errCh <- nil
+		}()
+
+		// prepare spinner and progress and start tuiModel
+		s := spinner.New()
+		s.Spinner = spinner.Line
+		pmod := progress.New(progress.WithDefaultGradient())
+		pmod.Width = 40
+
+		model := tuiModel{sp: s, prog: pmod, msg: "Starting...", ch: ch}
+		prg := tea.NewProgram(model)
+
+		// run TUI (blocking) while installations happen in goroutine
+		if err := prg.Start(); err != nil {
+			// fallback to headless if UI fails
+			for _, pkg := range toInstall {
+				if err := mgr.Install(pkg); err != nil {
+					return fmt.Errorf("failed to install %s: %w", pkg, err)
+				}
+			}
+		}
+
+		// wait for install result
+		if err := <-errCh; err != nil {
+			return err
+		}
+
+		fmt.Println("\nInstallation complete!")
+		return nil
+	}
+
+	// non-interactive install
 	for _, pkg := range toInstall {
 		fmt.Printf("Installing %s...\n", pkg)
 		if err := mgr.Install(pkg); err != nil {

@@ -2,9 +2,15 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
-	"github.com/mixos-go/mix-cli/pkg/manager"
+	"github.com/mixos-go/src/mix-cli/pkg/manager"
 	"github.com/spf13/cobra"
+
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/term"
 )
 
 var removeCmd = &cobra.Command{
@@ -83,7 +89,50 @@ func runRemove(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Remove packages
+	// If stdout is a terminal, run TUI remover; otherwise run headless
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		ch := make(chan manager.ProgressUpdate)
+		errCh := make(chan error, 1)
+		mgr.SetProgressChan(ch)
+
+		go func() {
+			for _, pkg := range toRemove {
+				if err := mgr.Remove(pkg, purge); err != nil {
+					errCh <- fmt.Errorf("failed to remove %s: %w", pkg, err)
+					close(ch)
+					return
+				}
+			}
+			close(ch)
+			errCh <- nil
+		}()
+
+		s := spinner.New()
+		s.Spinner = spinner.Line
+		pmod := progress.New(progress.WithDefaultGradient())
+		pmod.Width = 40
+
+		model := tuiModel{sp: s, prog: pmod, msg: "Starting...", ch: ch}
+		prg := tea.NewProgram(model)
+
+		if err := prg.Start(); err != nil {
+			// fallback to headless if UI fails
+			for _, pkg := range toRemove {
+				if err := mgr.Remove(pkg, purge); err != nil {
+					return fmt.Errorf("failed to remove %s: %w", pkg, err)
+				}
+			}
+		}
+
+		if err := <-errCh; err != nil {
+			return err
+		}
+
+		fmt.Println("\nRemoval complete!")
+		return nil
+	}
+
+	// non-interactive removal
 	for _, pkg := range toRemove {
 		fmt.Printf("Removing %s...\n", pkg)
 		if err := mgr.Remove(pkg, purge); err != nil {
