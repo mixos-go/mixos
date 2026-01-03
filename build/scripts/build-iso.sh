@@ -65,33 +65,56 @@ done
 # Find and mount the live filesystem
 echo "Searching for live filesystem..."
 
-# Wait for devices
-sleep 2
+# Wait for devices to settle (give CD-ROM more time to appear)
+sleep 15
 
-# Try to find the squashfs
 mkdir -p /mnt/cdrom /mnt/root
 
-# Try common CD-ROM devices
-for dev in /dev/sr0 /dev/cdrom /dev/hdc /dev/scd0; do
-    if [ -b "$dev" ]; then
-        mount -t iso9660 -o ro "$dev" /mnt/cdrom 2>/dev/null && break
+# Helper to attempt mounting a device as ISO9660 with retries
+try_mount_iso() {
+    local dev="$1"
+    local i
+    for i in 1 2 3 4 5; do
+        if [ -b "$dev" ]; then
+            echo "Trying to mount $dev (attempt $i)..."
+            if mount -t iso9660 -o ro "$dev" /mnt/cdrom; then
+                echo "Mounted $dev -> /mnt/cdrom"
+                ls -l /mnt/cdrom || true
+                return 0
+            else
+                echo "Mount failed for $dev (attempt $i)" >&2
+            fi
+        fi
+        sleep 2
+    done
+    return 1
+}
+
+# Try common CD-ROM and block devices
+for dev in /dev/sr0 /dev/cdrom /dev/hdc /dev/scd0 /dev/vda /dev/vdb /dev/sda /dev/sdb; do
+    if try_mount_iso "$dev"; then
+        break
     fi
 done
 
-# Also try virtio block devices
-for dev in /dev/vda /dev/vdb /dev/sda /dev/sdb; do
-    if [ -b "$dev" ] && [ ! -f /mnt/cdrom/live/filesystem.squashfs ]; then
-        mount -t iso9660 -o ro "$dev" /mnt/cdrom 2>/dev/null || true
-    fi
-done
-
-# Mount squashfs
-if [ -f /mnt/cdrom/live/filesystem.squashfs ]; then
-    echo "Found live filesystem, mounting..."
+# If mounted, look for filesystem.squashfs; also scan the mounted tree
+if [ -d /mnt/cdrom ] && [ -f /mnt/cdrom/live/filesystem.squashfs ]; then
+    echo "Found live filesystem at /mnt/cdrom/live/filesystem.squashfs, mounting..."
     mount -t squashfs -o ro /mnt/cdrom/live/filesystem.squashfs /mnt/root
 else
+    # Try to find filesystem.squashfs anywhere under /mnt/cdrom if mounted
+    if [ -d /mnt/cdrom ]; then
+        fs=$(find /mnt/cdrom -maxdepth 3 -type f -name filesystem.squashfs 2>/dev/null | head -n1 || true)
+        if [ -n "$fs" ]; then
+            echo "Found live filesystem at $fs, mounting..."
+            mount -t squashfs -o ro "$fs" /mnt/root
+        fi
+    fi
+fi
+
+# If mounting didn't succeed, fall back to initramfs root
+if [ ! -d /mnt/root ] || [ -z "$(ls -A /mnt/root 2>/dev/null)" ]; then
     echo "Live filesystem not found, using initramfs as root"
-    # Continue with initramfs as root
     exec /sbin/init
 fi
 
@@ -162,45 +185,53 @@ EOF
 
 # Create ISO
 echo "Creating ISO image..."
-grub-mkrescue -o "$OUTPUT_DIR/$ISO_NAME" "$ISO_DIR" \
+# Ensure filesystem buffers are flushed so xorriso/grub see final files
+sync
+
+# Prefer grub-mkrescue (works on many systems). If it fails or to avoid
+# subtle truncation issues when mixing internal temp dirs, fall back to an
+# explicit xorriso invocation that grafts exact files from $ISO_DIR.
+if grub-mkrescue -o "$OUTPUT_DIR/$ISO_NAME" "$ISO_DIR" \
     --product-name="MixOS-GO" \
-    --product-version="1.0.0" \
-    2>/dev/null || {
-    # Fallback method using xorriso directly
-    echo "Using xorriso fallback..."
-    xorriso -as mkisofs \
-        -o "$OUTPUT_DIR/$ISO_NAME" \
-        -isohybrid-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
-        -c boot/boot.cat \
-        -b boot/grub/i386-pc/eltorito.img \
-        -no-emul-boot \
-        -boot-load-size 4 \
-        -boot-info-table \
-        --grub2-boot-info \
-        --grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
-        -eltorito-alt-boot \
-        -e boot/grub/efi.img \
-        -no-emul-boot \
-        -isohybrid-gpt-basdat \
-        -V "MIXOS_GO" \
-        "$ISO_DIR" 2>/dev/null || {
-            # Simple ISO creation
-            echo "Using simple ISO creation..."
-            genisoimage -o "$OUTPUT_DIR/$ISO_NAME" \
-                -b boot/grub/i386-pc/eltorito.img \
-                -c boot/boot.cat \
-                -no-emul-boot \
-                -boot-load-size 4 \
-                -boot-info-table \
-                -J -R -V "MIXOS_GO" \
-                "$ISO_DIR" 2>/dev/null || {
-                    echo "Creating basic ISO without bootloader..."
-                    cd "$ISO_DIR"
-                    tar -czf "$OUTPUT_DIR/mixos-go-v1.0.0.tar.gz" .
-                    echo "Created tarball instead: $OUTPUT_DIR/mixos-go-v1.0.0.tar.gz"
-                }
-        }
-}
+    --product-version="1.0.0" 2>/dev/null; then
+    true
+else
+    echo "grub-mkrescue failed or unavailable; using explicit xorriso graft-points..."
+    # Use explicit graft-points so we control exact source files copied into the ISO
+    if command -v xorriso >/dev/null 2>&1; then
+        xorriso -as mkisofs \
+            -o "$OUTPUT_DIR/$ISO_NAME" \
+            -isohybrid-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
+            -c boot/boot.cat \
+            -b boot/grub/i386-pc/eltorito.img \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            --grub2-boot-info \
+            --grub2-mbr /usr/lib/grub/i386-pc/boot_hybrid.img \
+            -eltorito-alt-boot \
+            -e boot/grub/efi.img \
+            -no-emul-boot \
+            -isohybrid-gpt-basdat \
+            -V "MIXOS_GO" \
+            -graft-points \
+                /boot/initramfs.img="$ISO_DIR/boot/initramfs.img" \
+                /boot/vmlinuz="$ISO_DIR/boot/vmlinuz" \
+                /boot/grub/grub.cfg="$ISO_DIR/boot/grub/grub.cfg" \
+                /live="$ISO_DIR/live" \
+            2>/dev/null || {
+                echo "xorriso fallback failed; creating basic tarball instead..."
+                cd "$ISO_DIR"
+                tar -czf "$OUTPUT_DIR/mixos-go-v1.0.0.tar.gz" .
+                echo "Created tarball instead: $OUTPUT_DIR/mixos-go-v1.0.0.tar.gz"
+            }
+    else
+        echo "xorriso not installed; creating basic tarball instead..."
+        cd "$ISO_DIR"
+        tar -czf "$OUTPUT_DIR/mixos-go-v1.0.0.tar.gz" .
+        echo "Created tarball instead: $OUTPUT_DIR/mixos-go-v1.0.0.tar.gz"
+    fi
+fi
 
 # Generate checksums
 cd "$OUTPUT_DIR"
