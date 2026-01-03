@@ -590,7 +590,12 @@ func (m *Manager) removeFiles(files []string) error {
 }
 
 func (m *Manager) runScript(script, name string) error {
-	tmpFile, err := os.CreateTemp("", "mix-script-*")
+	// include name in temp filename pattern to avoid unused param warnings
+	pattern := "mix-script-"
+	if name != "" {
+		pattern += name + "-"
+	}
+	tmpFile, err := os.CreateTemp("", pattern+"*")
 	if err != nil {
 		return err
 	}
