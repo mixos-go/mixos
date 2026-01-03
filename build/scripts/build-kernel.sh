@@ -93,3 +93,11 @@ if [ "$KERNEL_SIZE_MB" -lt 15 ]; then
 else
     echo "⚠ Kernel size ($KERNEL_SIZE_MB MB) exceeds target (<15MB)"
 fi
+
+# Generate a recommended default kernel cmdline (for ISO/bootloader use)
+cat > "$OUTPUT_DIR/default-cmdline" << 'EOF'
+# Recommended kernel cmdline for MixOS-GO
+# Use this in GRUB or VM kernel options. To trigger automatic install by default,
+# set mixos.autoinstall=1 and mixos.config=/etc/mixos/install.yaml
+console=tty0 console=ttyS0,115200
+EOF

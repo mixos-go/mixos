@@ -10,6 +10,7 @@ TEST_DIR="/tmp/mix-test-$$"
 DB_PATH="$TEST_DIR/packages.db"
 CACHE_DIR="$TEST_DIR/cache"
 PKG_DIR="$PROJECT_DIR/artifacts/packages"
+INSTALLER="$PROJECT_DIR/artifacts/mixos-install"
 
 # Colors
 GREEN='\033[0;32m'
@@ -78,6 +79,19 @@ echo ""
 echo "Test 6: mix info"
 $MIX info --db "$DB_PATH" base-files 2>/dev/null || true
 pass "Info command runs"
+
+# Test 7: Installer smoke check
+echo ""
+echo "Test 7: mixos-install --version"
+if [ -x "$INSTALLER" ]; then
+    if "$INSTALLER" --version | grep -q "mixos-install version"; then
+        pass "Installer version"
+    else
+        fail "Installer version output"
+    fi
+else
+    fail "Installer binary not found at $INSTALLER"
+fi
 
 # Cleanup
 rm -rf "$TEST_DIR"

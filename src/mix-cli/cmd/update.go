@@ -2,9 +2,15 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
-	"github.com/mixos-go/mix-cli/pkg/manager"
+	"github.com/mixos-go/src/mix-cli/pkg/manager"
 	"github.com/spf13/cobra"
+
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
+	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/term"
 )
 
 var updateCmd = &cobra.Command{
@@ -99,7 +105,51 @@ func runUpgrade(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Perform upgrades
+	// Perform upgrades (TUI if terminal)
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		ch := make(chan manager.ProgressUpdate)
+		errCh := make(chan error, 1)
+		mgr.SetProgressChan(ch)
+
+		go func() {
+			for _, pkg := range toUpgrade {
+				if err := mgr.Upgrade(pkg.Name); err != nil {
+					errCh <- fmt.Errorf("failed to upgrade %s: %w", pkg.Name, err)
+					close(ch)
+					return
+				}
+			}
+			close(ch)
+			errCh <- nil
+		}()
+
+		s := spinner.New()
+		s.Spinner = spinner.Line
+		pmod := progress.New(progress.WithDefaultGradient())
+		pmod.Width = 40
+
+		model := tuiModel{sp: s, prog: pmod, msg: "Starting...", ch: ch}
+		prg := tea.NewProgram(model)
+
+		if err := prg.Start(); err != nil {
+			// fallback to headless if UI fails
+			for _, pkg := range toUpgrade {
+				if err := mgr.Upgrade(pkg.Name); err != nil {
+					return fmt.Errorf("failed to upgrade %s: %w", pkg.Name, err)
+				}
+				fmt.Printf("  ✓ %s upgraded to %s\n", pkg.Name, pkg.NewVersion)
+			}
+		}
+
+		if err := <-errCh; err != nil {
+			return err
+		}
+
+		fmt.Println("\nUpgrade complete!")
+		return nil
+	}
+
+	// non-interactive upgrade
 	for _, pkg := range toUpgrade {
 		fmt.Printf("Upgrading %s...\n", pkg.Name)
 		if err := mgr.Upgrade(pkg.Name); err != nil {

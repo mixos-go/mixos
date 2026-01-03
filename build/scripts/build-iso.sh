@@ -286,7 +286,7 @@ menuentry "⚡ MixOS-GO v$VERSION (VRAM Mode - Maximum Performance)" {
 }
 
 menuentry "💿 MixOS-GO v$VERSION (Standard Boot)" {
-    linux /boot/vmlinuz console=ttyS0 quiet
+    linux /boot/vmlinuz console=ttyS0 quiet console=tty0 console=ttyS0,115200
     initrd /boot/initramfs.img
 }
 
@@ -296,12 +296,18 @@ menuentry "🔧 MixOS-GO v$VERSION (Verbose)" {
 }
 
 menuentry "🛠️ MixOS-GO v$VERSION (Recovery Shell)" {
-    linux /boot/vmlinuz console=ttyS0 single init=/bin/sh
+    linux /boot/vmlinuz console=ttyS0 single init=/bin/sh console=tty0 console=ttyS0,115200
     initrd /boot/initramfs.img
 }
 
 menuentry "📖 MixOS-GO v$VERSION (Debug Mode)" {
-    linux /boot/vmlinuz console=ttyS0 debug
+    linux /boot/vmlinuz console=ttyS0 debug console=tty0 console=ttyS0,115200
+    initrd /boot/initramfs.img
+}
+
+# Automatic installer entry (uses /etc/mixos/install.yaml on the live image)
+menuentry "MixOS-GO Automatic Install" {
+    linux /boot/vmlinuz console=tty0 console=ttyS0,115200 mixos.autoinstall=1 mixos.config=/etc/mixos/install.yaml
     initrd /boot/initramfs.img
 }
 EOF

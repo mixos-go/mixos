@@ -20,6 +20,15 @@ type Manager struct {
 	db       *Database
 	repoURL  string
 	cacheDir string
+	// optional progress channel for UI consumers
+	progressChan chan<- ProgressUpdate
+}
+
+// ProgressUpdate represents a status update emitted by Manager operations.
+type ProgressUpdate struct {
+	Stage   string  // e.g. download, verify, extract, install
+	Percent float64 // 0.0 - 1.0
+	Message string  // human readable message
 }
 
 type PackageInfo struct {
@@ -74,6 +83,12 @@ func New(dbPath, repoURL, cacheDir string) (*Manager, error) {
 	}, nil
 }
 
+// SetProgressChan registers a channel to receive ProgressUpdate events.
+// Pass nil to disable progress reporting.
+func (m *Manager) SetProgressChan(ch chan<- ProgressUpdate) {
+	m.progressChan = ch
+}
+
 func (m *Manager) Close() error {
 	return m.db.Close()
 }
@@ -95,6 +110,9 @@ func (m *Manager) Install(pkgName string) error {
 	}
 
 	// Download package
+	if m.progressChan != nil {
+		m.progressChan <- ProgressUpdate{Stage: "start", Percent: 0.0, Message: "Starting installation"}
+	}
 	pkgPath, err := m.downloadPackage(pkgName, info.Version)
 	if err != nil {
 		return fmt.Errorf("failed to download package: %w", err)
@@ -102,6 +120,9 @@ func (m *Manager) Install(pkgName string) error {
 
 	// Verify checksum
 	if info.Checksum != "" {
+		if m.progressChan != nil {
+			m.progressChan <- ProgressUpdate{Stage: "verify", Percent: 0.25, Message: "Verifying checksum"}
+		}
 		if err := m.verifyChecksum(pkgPath, info.Checksum); err != nil {
 			os.Remove(pkgPath)
 			return fmt.Errorf("checksum verification failed: %w", err)
@@ -109,6 +130,9 @@ func (m *Manager) Install(pkgName string) error {
 	}
 
 	// Extract and install package
+	if m.progressChan != nil {
+		m.progressChan <- ProgressUpdate{Stage: "extract", Percent: 0.5, Message: "Extracting package"}
+	}
 	metadata, err := m.extractPackage(pkgPath)
 	if err != nil {
 		return fmt.Errorf("failed to extract package: %w", err)
@@ -122,6 +146,9 @@ func (m *Manager) Install(pkgName string) error {
 	}
 
 	// Install files
+	if m.progressChan != nil {
+		m.progressChan <- ProgressUpdate{Stage: "install", Percent: 0.75, Message: "Installing files"}
+	}
 	installedFiles, err := m.installFiles(pkgPath)
 	if err != nil {
 		return fmt.Errorf("failed to install files: %w", err)
@@ -139,6 +166,10 @@ func (m *Manager) Install(pkgName string) error {
 	// Record installation in database
 	if err := m.db.RecordInstallation(pkgName, info.Version, installedFiles); err != nil {
 		return fmt.Errorf("failed to record installation: %w", err)
+	}
+
+	if m.progressChan != nil {
+		m.progressChan <- ProgressUpdate{Stage: "done", Percent: 1.0, Message: "Installation complete"}
 	}
 
 	return nil
@@ -163,24 +194,46 @@ func (m *Manager) Remove(pkgName string, purge bool) error {
 	// Get package metadata for scripts
 	info, _ := m.db.GetInstalledPackage(pkgName)
 
+	// Emit start
+	if m.progressChan != nil {
+		m.progressChan <- ProgressUpdate{Stage: "start", Percent: 0.0, Message: "Starting removal"}
+	}
+
 	// Run pre-remove script if available
 	if info != nil && info.PreRemove != "" {
-		m.runScript(info.PreRemove, "pre-remove")
+		if m.progressChan != nil {
+			m.progressChan <- ProgressUpdate{Stage: "pre-remove", Percent: 0.1, Message: "Running pre-remove script"}
+		}
+		if err := m.runScript(info.PreRemove, "pre-remove"); err != nil {
+			return fmt.Errorf("pre-remove script failed: %w", err)
+		}
 	}
 
 	// Remove files
+	if m.progressChan != nil {
+		m.progressChan <- ProgressUpdate{Stage: "remove-files", Percent: 0.5, Message: "Removing files"}
+	}
 	if err := m.removeFiles(files); err != nil {
 		return fmt.Errorf("failed to remove files: %w", err)
 	}
 
 	// Run post-remove script if available
 	if info != nil && info.PostRemove != "" {
-		m.runScript(info.PostRemove, "post-remove")
+		if m.progressChan != nil {
+			m.progressChan <- ProgressUpdate{Stage: "post-remove", Percent: 0.8, Message: "Running post-remove script"}
+		}
+		if err := m.runScript(info.PostRemove, "post-remove"); err != nil {
+			return fmt.Errorf("post-remove script failed: %w", err)
+		}
 	}
 
 	// Remove from database
 	if err := m.db.RemoveInstallation(pkgName); err != nil {
 		return fmt.Errorf("failed to update database: %w", err)
+	}
+
+	if m.progressChan != nil {
+		m.progressChan <- ProgressUpdate{Stage: "done", Percent: 1.0, Message: "Removal complete"}
 	}
 
 	return nil

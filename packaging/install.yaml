@@ -1,0 +1,16 @@
+# Sample unattended install config for MixOS
+hostname: mixos-auto
+root_password: "changeme"
+create_user:
+  name: user
+  password: "userpass"
+  sudo: true
+network:
+  mode: dhcp
+  interface: eth0
+packages:
+  - base-files
+  - openssh
+post_install_scripts:
+  - |
+    echo "Installed via unattended ISO" > /etc/mixos/installed.txt

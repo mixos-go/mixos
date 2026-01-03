@@ -85,6 +85,69 @@ umount -R /mnt
 reboot
 ```
 
+## Installer (Interactive and Unattended)
+
+MixOS includes an interactive terminal installer (`mixos-install`) which is run on first boot if present. The installer also supports an unattended YAML configuration file for automated installations.
+
+Files of interest:
+- `packaging/install.yaml` — repository sample config used by `make iso-autoinstall`.
+- `/etc/mixos/install.yaml` — path on the live image used by the autoinstall runner.
+
+Autoinstall options can also be passed via the kernel command line:
+- `mixos.autoinstall=1` — enable autoinstall
+- `mixos.config=/path/to/install.yaml` — path to config file (e.g. `/etc/mixos/install.yaml`)
+
+Example: boot an automatic install from GRUB or VM kernel args:
+
+```
+console=tty0 console=ttyS0,115200 mixos.autoinstall=1 mixos.config=/etc/mixos/install.yaml
+```
+
+Config schema (YAML, concise):
+
+```yaml
+hostname: myhost
+root_password: "plain-or-hint"
+# or provide a precomputed hash:
+root_password_hash: "$6$..."
+create_user:
+    name: user
+    password: "userpass"
+    password_hash: "..."
+    sudo: true
+network:
+    mode: dhcp # or static
+    interface: eth0
+    address: 192.168.1.100/24
+    gateway: 192.168.1.1
+    nameservers: [8.8.8.8, 1.1.1.1]
+packages:
+    - base-files
+    - openssh
+post_install_scripts:
+    - |
+        echo "post install"
+```
+
+Security notes:
+- Prefer hashed passwords when embedding configs. The installer accepts plaintext and uses `chpasswd` if available; providing a hash will attempt to write `/etc/shadow` directly (best-effort).
+- Do not include secrets in public ISOs.
+
+Building an unattended ISO
+
+```bash
+# Build unattended ISO using the repository sample:
+make iso-autoinstall
+
+# Or embed your own config file:
+INSTALL_CONFIG=/abs/path/to/install.yaml make iso
+```
+
+CI validation
+
+The CI workflow performs a dry-run of the installer to validate parsing and basic operations. This does not execute destructive actions — it runs `mixos-install --config packaging/install.yaml --dry-run` as part of the build.
+
+
 ## Post-Installation Setup
 
 ### 1. Set Root Password (Optional)
