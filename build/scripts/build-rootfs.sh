@@ -48,7 +48,27 @@ if [ ! -d "$BUSYBOX_SRC" ]; then
     tar -xf "$BUSYBOX_TARBALL" -C "$BUILD_DIR"
 fi
 
+# Get the repository root directory (where the script was called from)
+REPO_ROOT="$(pwd)"
+PATCH_DIR="$REPO_ROOT/build/patches"
+
+echo "Repository root: $REPO_ROOT"
+echo "Patch directory: $PATCH_DIR"
+
 cd "$BUSYBOX_SRC"
+
+# Apply patches
+if [ -d "$PATCH_DIR" ]; then
+    for patch in "$PATCH_DIR"/busybox-*.patch; do
+        if [ -f "$patch" ]; then
+            echo "Applying patch: $(basename "$patch")"
+            patch -p1 < "$patch" || echo "Patch may already be applied or failed"
+        fi
+    done
+else
+    echo "Warning: Patch directory not found at $PATCH_DIR"
+    ls -la "$REPO_ROOT/build/" || true
+fi
 
 # Configure BusyBox for static build
 echo "Configuring BusyBox..."
