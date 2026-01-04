@@ -57,14 +57,16 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             build-essential \
             bc \
             bison \
             flex \
             libelf-dev \
             libssl-dev \
-            libncurses-dev
+            libncurses-dev \
+            git \
+            cpio
 
       - name: Cache kernel source
         uses: actions/cache@v4
@@ -103,13 +105,16 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             grub-pc-bin \
             grub-efi-amd64-bin \
+            grub-common \
             xorriso \
             squashfs-tools \
             mtools \
-            cpio
+            cpio \
+            git \
+            qemu-system-x86
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -179,6 +184,25 @@ jobs:
           export BUILD_DIR=/tmp/mixos-build
           export OUTPUT_DIR=${{ github.workspace }}/artifacts
           bash build/scripts/build-iso.sh
+
+      - name: Smoke boot ISO (QEMU)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86
+          mkdir -p artifacts
+          ISO=$(ls artifacts/*.iso | head -n1 || true)
+          if [ -z "$ISO" ]; then
+            echo "No ISO found in artifacts/; failing smoke boot"; exit 1
+          fi
+          timeout 90s qemu-system-x86_64 -cdrom "$ISO" -m 512 -nographic -serial file:./artifacts/boot.log || true
+          if grep -qi 'mixos login' artifacts/boot.log || grep -qi 'MixOS-GO' artifacts/boot.log; then
+            echo "ISO boot smoke test: OK"
+          else
+            echo "ISO boot smoke test: FAILED"
+            echo "==== Serial log (head) ===="
+            sed -n '1,200p' artifacts/boot.log || true
+            exit 1
+          fi
 
       - name: Generate checksums
         run: |
